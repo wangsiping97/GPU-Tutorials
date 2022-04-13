@@ -2,6 +2,8 @@
 
 [CUDA TOOLKIT DOCUMENTATION Chapter 9](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#memory-optimizations)
 
+[How to Overlap Data Transfers in CUDA C/C++](https://developer.nvidia.com/blog/how-overlap-data-transfers-cuda-cc/) 
+
 Maximize bandwidth => More fast memory, less slow-access memory
 
 ## 1 Data Transfer Between Host and Device
@@ -25,7 +27,29 @@ Maximize bandwidth => More fast memory, less slow-access memory
 
 **Note:** Allocating excessive pinned memory may degrade system performance, since it reduces the memory for paging. **Test the application and the systems it runs on for optimal performance parameters.** 
 
-### Asynchronous and Overlapping Transfers with Computation
+### Overlap Data Transfers with Computation on the Host
+
+(See Nvidia's Technical Blog: [How to Overlay Data Transfers in CUDA C/C++](https://developer.nvidia.com/blog/how-overlap-data-transfers-cuda-cc/))
+
+#### (1) CUDA Streams
+
+**Definition:** A sequence of operations that execute on the device in the order in which they are issued by the host code. All device operations (kernels and data transfers) run in a stream. 
+
+- Default stream: Used when no stream is specified
+
+  - Synchronizing stream => synchronize with operation in other streams => an operation begins after all previously issued operations *in any stream on the device* have completed; and completes before any other operation *in any stream on the device* will begin. (Exception: [CUDA 7](https://developer.nvidia.com/blog/parallelforall/gpu-pro-tip-cuda-7-streams-simplify-concurrency/))
+  - Overlapping strategy: based on the **asynchronous behavior of kernel launches**
+
+- Non-default stream: Explicitly declared, created, and destroyed by the host
+
+  - Non-blocking stream => sometimes need to synchronize with the host code
+    - `cudaDeviceSynchronize()`: blocks the host code until *all* previously issued operations on the device have completed
+    - `cudaStreamSynchronize(stream)`: blocks the host thread until all previoulsy issued operations *in the specified stream* have completed
+    - `cudaEventSynchronize(event)`: blocks the host thread until all previously issued operations *in the specified event* have completed
+
+  - Overlapping strategy: based on **asynchronous data transfers**
+
+#### (2) Overlapping Kernel Execution and Data Transfers
 
 `cudaMemcpyAsync()`: A non-blocking variant of `cudaMemcpy()`. Requires pinned host memory.
 
@@ -33,7 +57,7 @@ Asynchronous tranfers enable overlap of data transfers by:
 
 - Overlapping host computation with async data transfers and with device computations. 
 
-- Overlapping kernel execution with async data transfer. On devices that are capable of concurrent copy and compute (see `asyncEngineCount`), the data transfer and kernel must use different, non-default streams (stream with non-zero IDs). 
+- Overlapping kernel execution with async data transfer. On devices that are capable of concurrent copy and compute (see `asyncEngineCount`), the data transfer and kernel must use different, non-default streams (stream with non-zero IDs).
 
   ```c++
   cudaStreamCreate(&stream1);
@@ -42,7 +66,7 @@ Asynchronous tranfers enable overlap of data transfers by:
   kernel<<<grid, block, 0, stream2>>>(otherData_d);
   ```
 
-  
+##### **Notice:** Different GPU architectures have different numbers of copy and kernel engines, which may differ in performance when using asynchronous transfers. 
 
 ### Zero Copy
 
@@ -117,7 +141,7 @@ cudaGetDeviceProperties(&prop, device_id);
 cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, prop.persistingL2CacheMaxSize); /* Set aside max possible size of L2 cache for persisting accesses */ 
 ```
 
-**Cache Access Window **-- `accessPolicyWindow` includes: 
+**Cache Access Window** -- `accessPolicyWindow` includes: 
 
 - `base_ptr`: Global memory data pointer
 - `num_bytes`: Number of bytes for persisting accesses. Must be less than the max window size. 
@@ -205,7 +229,9 @@ Best when threads in the same warp accesses only a few distinct locations. If al
 
 **Device memory should be reused and/or sub-allocated by the application whenever possible** to minimize the impact of allocations on overall performance. 
 
+## Other References
+
 [^1]: [Page-Locked Host Memory for Data Transfer](https://leimao.github.io/blog/Page-Locked-Host-Memory-Data-Transfer/#:~:text=With%20paged%20memory%2C%20the%20specific,locked%20memory%20or%20pinned%20memory.)
-[^2]: [**Introduction to GPGPU and CUDA Programming:** Memory Coalescing](https://cvw.cac.cornell.edu/gpu/coalesced#:~:text=Coalesced%20memory%20access%20or%20memory,threads%20in%20a%20single%20transaction.)
+[^2]: [Introduction to GPGPU and CUDA Programming: Memory Coalescing](https://cvw.cac.cornell.edu/gpu/coalesced#:~:text=Coalesced%20memory%20access%20or%20memory,threads%20in%20a%20single%20transaction.)
 [^3]: [GPU Optimization Fundamentals](https://www.olcf.ornl.gov/wp-content/uploads/2013/02/GPU_Opt_Fund-CW1.pdf)
 [^4]: [CUaccessPolicyWindow_v1 Struct Reference](https://docs.nvidia.com/cuda/cuda-driver-api/structCUaccessPolicyWindow__v1.html#structCUaccessPolicyWindow__v1_1d6ed5cd7bb416976b45e75bafce547e9)
